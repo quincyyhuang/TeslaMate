@@ -26,6 +26,9 @@ final class DashboardViewModel: ObservableObject {
     @Published var availableDatasources: [GrafanaDatasource] = []
     @Published var connectionStatus = ConnectionStatus.idle
 
+    @Published var drivesDateFilter: DateFilterOption = .all
+    @Published var chargingDateFilter: DateFilterOption = .all
+
     enum ConnectionStatus: Equatable {
         case idle
         case testing
@@ -359,6 +362,7 @@ final class DashboardViewModel: ObservableObject {
         isLoadingMoreDrives = !reset
         defer { isLoadingMoreDrives = false }
 
+        let filterClause = drivesDateFilter.sqlCondition(column: "d.start_date").map { "AND " + $0 } ?? ""
         let sql = """
         SELECT
             d.id,
@@ -381,6 +385,7 @@ final class DashboardViewModel: ObservableObject {
         LEFT JOIN geofences start_geofence ON d.start_geofence_id = start_geofence.id
         LEFT JOIN geofences end_geofence ON d.end_geofence_id = end_geofence.id
         WHERE d.car_id = \(carID)
+          \(filterClause)
         ORDER BY d.start_date DESC
         LIMIT \(pageSize)
         OFFSET \(drivesOffset)
@@ -430,6 +435,7 @@ final class DashboardViewModel: ObservableObject {
         isLoadingMoreCharges = !reset
         defer { isLoadingMoreCharges = false }
 
+        let filterClause = chargingDateFilter.sqlCondition(column: "c.start_date").map { "AND " + $0 } ?? ""
         let sql = """
         SELECT
             c.id,
@@ -452,6 +458,7 @@ final class DashboardViewModel: ObservableObject {
         LEFT JOIN geofences g ON c.geofence_id = g.id
         LEFT JOIN positions p ON c.position_id = p.id
         WHERE c.car_id = \(carID)
+          \(filterClause)
         ORDER BY c.start_date DESC
         LIMIT \(pageSize)
         OFFSET \(chargesOffset)

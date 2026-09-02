@@ -5,41 +5,50 @@ struct ChargingTab: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if viewModel.recentCharges.isEmpty && viewModel.isLoading {
-                    ProgressView("Loading Charges...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if viewModel.recentCharges.isEmpty {
-                    ContentUnavailableView(
-                        "No Charging Sessions Yet",
-                        systemImage: "bolt.car",
-                        description: Text("Recent charging sessions will appear here once recorded by TeslaMate.")
-                    )
-                } else {
-                    List {
-                        ForEach(viewModel.recentCharges) { charge in
-                            NavigationLink {
-                                ChargeDetailView(charge: charge, viewModel: viewModel)
-                            } label: {
-                                ChargeRow(charge: charge)
-                            }
-                            .task {
-                                await viewModel.loadMoreChargesIfNeeded(currentItem: charge)
-                            }
-                        }
+            VStack(spacing: 0) {
+                TimeFilterHeaderView(selectedFilter: $viewModel.chargingDateFilter) {
+                    Task { await viewModel.loadChargingOnly() }
+                }
 
-                        if viewModel.isLoadingMoreCharges {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                Spacer()
+                Divider()
+                    .padding(.top, 4)
+
+                Group {
+                    if viewModel.recentCharges.isEmpty && viewModel.isLoading {
+                        ProgressView("Loading Charges...")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if viewModel.recentCharges.isEmpty {
+                        ContentUnavailableView(
+                            "No Charging Sessions Found",
+                            systemImage: "bolt.car",
+                            description: Text(viewModel.chargingDateFilter == .all ? "Recent charging sessions will appear here once recorded by TeslaMate." : "No charging sessions recorded for the selected time range.")
+                        )
+                    } else {
+                        List {
+                            ForEach(viewModel.recentCharges) { charge in
+                                NavigationLink {
+                                    ChargeDetailView(charge: charge, viewModel: viewModel)
+                                } label: {
+                                    ChargeRow(charge: charge)
+                                }
+                                .task {
+                                    await viewModel.loadMoreChargesIfNeeded(currentItem: charge)
+                                }
                             }
-                            .listRowSeparator(.hidden)
+
+                            if viewModel.isLoadingMoreCharges {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                    Spacer()
+                                }
+                                .listRowSeparator(.hidden)
+                            }
                         }
-                    }
-                    .listStyle(.insetGrouped)
-                    .refreshable {
-                        await viewModel.loadChargingOnly()
+                        .listStyle(.insetGrouped)
+                        .refreshable {
+                            await viewModel.loadChargingOnly()
+                        }
                     }
                 }
             }
