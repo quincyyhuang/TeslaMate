@@ -307,17 +307,99 @@ private struct DriveDetailView: View {
 private struct DriveMapView: View {
     let coordinates: [CLLocationCoordinate2D]
 
+    @State private var position: MapCameraPosition = .automatic
+    @State private var isFullScreen = false
+    @State private var mapStyle = MapStyleChoice.standard
+
+    enum MapStyleChoice: String, CaseIterable, Identifiable {
+        case standard = "Standard"
+        case hybrid = "Satellite"
+
+        var id: String { rawValue }
+        var style: MapStyle {
+            switch self {
+            case .standard: return .standard(elevation: .realistic)
+            case .hybrid: return .hybrid(elevation: .realistic)
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if coordinates.isEmpty {
                 ContentUnavailableView("No GPS Route Data", systemImage: "map")
-                    .frame(height: 220)
+                    .frame(height: 240)
                     .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
-                Map {
+                ZStack(alignment: .topTrailing) {
+                    Map(position: $position, interactionModes: .all) {
+                        if coordinates.count > 1 {
+                            MapPolyline(coordinates: coordinates)
+                                .stroke(Color.blue, lineWidth: 4)
+                        }
+
+                        if let start = coordinates.first {
+                            Marker("Start", coordinate: start)
+                                .tint(.green)
+                        }
+
+                        if let end = coordinates.last, coordinates.count > 1 {
+                            Marker("End", coordinate: end)
+                                .tint(.red)
+                        }
+                    }
+                    .mapStyle(mapStyle.style)
+                    .mapControls {
+                        MapCompass()
+                        MapScaleView()
+                    }
+                    .frame(height: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                    HStack(spacing: 8) {
+                        Button {
+                            withAnimation {
+                                position = .automatic
+                            }
+                        } label: {
+                            Image(systemName: "location.viewfinder")
+                                .font(.system(size: 13, weight: .bold))
+                                .padding(8)
+                                .background(.thinMaterial, in: Circle())
+                        }
+
+                        Button {
+                            isFullScreen = true
+                        } label: {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 13, weight: .bold))
+                                .padding(8)
+                                .background(.thinMaterial, in: Circle())
+                        }
+                    }
+                    .padding(10)
+                }
+                .sheet(isPresented: $isFullScreen) {
+                    FullScreenMapView(coordinates: coordinates, mapStyle: $mapStyle)
+                }
+            }
+        }
+    }
+}
+
+private struct FullScreenMapView: View {
+    let coordinates: [CLLocationCoordinate2D]
+    @Binding var mapStyle: DriveMapView.MapStyleChoice
+    @Environment(\.dismiss) private var dismiss
+    @State private var position: MapCameraPosition = .automatic
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .topTrailing) {
+                Map(position: $position, interactionModes: .all) {
                     if coordinates.count > 1 {
                         MapPolyline(coordinates: coordinates)
-                            .stroke(Color.blue, lineWidth: 4)
+                            .stroke(Color.blue, lineWidth: 5)
                     }
 
                     if let start = coordinates.first {
@@ -330,8 +412,50 @@ private struct DriveMapView: View {
                             .tint(.red)
                     }
                 }
-                .frame(height: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .mapStyle(mapStyle.style)
+                .mapControls {
+                    MapCompass()
+                    MapPitchToggle()
+                    MapScaleView()
+                }
+
+                VStack(alignment: .trailing, spacing: 12) {
+                    Picker("Style", selection: $mapStyle) {
+                        ForEach(DriveMapView.MapStyleChoice.allCases) { choice in
+                            Text(choice.rawValue).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+
+                    Button {
+                        withAnimation {
+                            position = .automatic
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "location.viewfinder")
+                            Text("Fit Route")
+                        }
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.thinMaterial, in: Capsule())
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Drive Route")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
             }
         }
     }
@@ -563,27 +687,64 @@ private struct DriveTelemetryChartSection: View {
 
 private struct SpeedChartView: View {
     let positions: [DrivePositionPoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: DrivePositionPoint? {
+        guard let date = selectedDate else { return nil }
+        return positions.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let maxSpeed = positions.compactMap(\.speedMph).max() {
-                Text("Max Speed: \(maxSpeed.formatted(.number.precision(.fractionLength(0)))) mph")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let selected = selectedPoint, let speed = selected.speedMph {
+                    Text("\(speed.formatted(.number.precision(.fractionLength(1)))) mph")
+                        .font(.headline)
+                        .foregroundStyle(.blue)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let maxSpeed = positions.compactMap(\.speedMph).max() {
+                    Text("Max Speed: \(maxSpeed.formatted(.number.precision(.fractionLength(0)))) mph")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Press & hold to scrub")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Chart(positions) { point in
-                AreaMark(
-                    x: .value("Time", point.date),
-                    y: .value("Speed (mph)", point.speedMph ?? 0)
-                )
-                .foregroundStyle(LinearGradient(colors: [.blue.opacity(0.35), .blue.opacity(0.05)], startPoint: .top, endPoint: .bottom))
 
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Speed (mph)", point.speedMph ?? 0)
-                )
-                .foregroundStyle(.blue)
+            Chart {
+                ForEach(positions) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        y: .value("Speed (mph)", point.speedMph ?? 0)
+                    )
+                    .foregroundStyle(LinearGradient(colors: [.blue.opacity(0.35), .blue.opacity(0.05)], startPoint: .top, endPoint: .bottom))
+
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Speed (mph)", point.speedMph ?? 0)
+                    )
+                    .foregroundStyle(.blue)
+                }
+
+                if let selected = selectedPoint, let speed = selected.speedMph {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Speed (mph)", speed)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(.blue)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -591,29 +752,63 @@ private struct SpeedChartView: View {
 
 private struct PowerChartView: View {
     let positions: [DrivePositionPoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: DrivePositionPoint? {
+        guard let date = selectedDate else { return nil }
+        return positions.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                if let maxPower = positions.compactMap(\.powerKW).max() {
-                    Text("Peak: +\(maxPower.formatted(.number.precision(.fractionLength(0)))) kW")
+                if let selected = selectedPoint, let p = selected.powerKW {
+                    let isRegen = p < 0
+                    Text("\(isRegen ? "" : "+")\(p.formatted(.number.precision(.fractionLength(1)))) kW (\(isRegen ? "Regen" : "Power"))")
+                        .font(.headline)
+                        .foregroundStyle(isRegen ? .green : .orange)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
                         .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                Spacer()
-                if let minPower = positions.compactMap(\.powerKW).min() {
-                    Text("Regen: \(minPower.formatted(.number.precision(.fractionLength(0)))) kW")
-                        .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.secondary)
+                } else {
+                    if let maxPower = positions.compactMap(\.powerKW).max() {
+                        Text("Peak: +\(maxPower.formatted(.number.precision(.fractionLength(0)))) kW")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Spacer()
+                    if let minPower = positions.compactMap(\.powerKW).min() {
+                        Text("Regen: \(minPower.formatted(.number.precision(.fractionLength(0)))) kW")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                 }
             }
-            Chart(positions) { point in
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Power (kW)", point.powerKW ?? 0)
-                )
-                .foregroundStyle((point.powerKW ?? 0) >= 0 ? Color.orange : Color.green)
+
+            Chart {
+                ForEach(positions) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Power (kW)", point.powerKW ?? 0)
+                    )
+                    .foregroundStyle((point.powerKW ?? 0) >= 0 ? Color.orange : Color.green)
+                }
+
+                if let selected = selectedPoint, let p = selected.powerKW {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Power (kW)", p)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(p >= 0 ? Color.orange : Color.green)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -621,28 +816,67 @@ private struct PowerChartView: View {
 
 private struct ElevationChartView: View {
     let positions: [DrivePositionPoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: DrivePositionPoint? {
+        guard let date = selectedDate else { return nil }
+        return positions.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            let elevations = positions.compactMap(\.elevationFt)
-            if let minE = elevations.min(), let maxE = elevations.max() {
-                Text("Elevation Range: \(minE.formatted(.number.precision(.fractionLength(0)))) ft – \(maxE.formatted(.number.precision(.fractionLength(0)))) ft")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let selected = selectedPoint, let elevation = selected.elevationFt {
+                    Text("\(elevation.formatted(.number.precision(.fractionLength(0)))) ft")
+                        .font(.headline)
+                        .foregroundStyle(.purple)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    let elevations = positions.compactMap(\.elevationFt)
+                    if let minE = elevations.min(), let maxE = elevations.max() {
+                        Text("Elevation: \(minE.formatted(.number.precision(.fractionLength(0)))) ft – \(maxE.formatted(.number.precision(.fractionLength(0)))) ft")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("Press & hold to scrub")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Chart(positions) { point in
-                AreaMark(
-                    x: .value("Time", point.date),
-                    y: .value("Elevation (ft)", point.elevationFt ?? 0)
-                )
-                .foregroundStyle(LinearGradient(colors: [.purple.opacity(0.35), .purple.opacity(0.05)], startPoint: .top, endPoint: .bottom))
 
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Elevation (ft)", point.elevationFt ?? 0)
-                )
-                .foregroundStyle(.purple)
+            Chart {
+                ForEach(positions) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        y: .value("Elevation (ft)", point.elevationFt ?? 0)
+                    )
+                    .foregroundStyle(LinearGradient(colors: [.purple.opacity(0.35), .purple.opacity(0.05)], startPoint: .top, endPoint: .bottom))
+
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Elevation (ft)", point.elevationFt ?? 0)
+                    )
+                    .foregroundStyle(.purple)
+                }
+
+                if let selected = selectedPoint, let elevation = selected.elevationFt {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Elevation (ft)", elevation)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(.purple)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -650,22 +884,62 @@ private struct ElevationChartView: View {
 
 private struct BatteryChartView: View {
     let positions: [DrivePositionPoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: DrivePositionPoint? {
+        guard let date = selectedDate else { return nil }
+        return positions.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            let bats = positions.compactMap(\.batteryLevel)
-            if let start = bats.first, let end = bats.last {
-                Text("State of Charge: \(Int(start))% → \(Int(end))%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let selected = selectedPoint, let bat = selected.batteryLevel {
+                    let rangeStr = selected.idealRangeKm.map { " (\(($0 * 0.621371).formatted(.number.precision(.fractionLength(0)))) mi)" } ?? ""
+                    Text("\(Int(bat))%\(rangeStr)")
+                        .font(.headline)
+                        .foregroundStyle(.green)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    let bats = positions.compactMap(\.batteryLevel)
+                    if let start = bats.first, let end = bats.last {
+                        Text("State of Charge: \(Int(start))% → \(Int(end))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("Press & hold to scrub")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Chart(positions) { point in
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Battery %", point.batteryLevel ?? 0)
-                )
-                .foregroundStyle(.green)
+
+            Chart {
+                ForEach(positions) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Battery %", point.batteryLevel ?? 0)
+                    )
+                    .foregroundStyle(.green)
+                }
+
+                if let selected = selectedPoint, let bat = selected.batteryLevel {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Battery %", bat)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(.green)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -863,13 +1137,143 @@ private struct ChargeLocationMapView: View {
     let coordinate: CLLocationCoordinate2D
     let title: String
 
+    @State private var position: MapCameraPosition
+    @State private var isFullScreen = false
+
+    init(coordinate: CLLocationCoordinate2D, title: String) {
+        self.coordinate = coordinate
+        self.title = title
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 3500,
+            longitudinalMeters: 3500
+        )
+        _position = State(initialValue: .region(region))
+    }
+
     var body: some View {
-        Map {
-            Marker(title, coordinate: coordinate)
-                .tint(.green)
+        ZStack(alignment: .topTrailing) {
+            Map(position: $position, interactionModes: .all) {
+                Marker(title, coordinate: coordinate)
+                    .tint(.green)
+            }
+            .mapControls {
+                MapCompass()
+                MapScaleView()
+            }
+            .frame(height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation {
+                        let region = MKCoordinateRegion(
+                            center: coordinate,
+                            latitudinalMeters: 3500,
+                            longitudinalMeters: 3500
+                        )
+                        position = .region(region)
+                    }
+                } label: {
+                    Image(systemName: "location.viewfinder")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(8)
+                        .background(.thinMaterial, in: Circle())
+                }
+
+                Button {
+                    isFullScreen = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(8)
+                        .background(.thinMaterial, in: Circle())
+                }
+            }
+            .padding(10)
         }
-        .frame(height: 200)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .sheet(isPresented: $isFullScreen) {
+            FullScreenChargeMapView(coordinate: coordinate, title: title)
+        }
+    }
+}
+
+private struct FullScreenChargeMapView: View {
+    let coordinate: CLLocationCoordinate2D
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var position: MapCameraPosition
+    @State private var mapStyle = DriveMapView.MapStyleChoice.standard
+
+    init(coordinate: CLLocationCoordinate2D, title: String) {
+        self.coordinate = coordinate
+        self.title = title
+        let region = MKCoordinateRegion(
+            center: coordinate,
+            latitudinalMeters: 3500,
+            longitudinalMeters: 3500
+        )
+        _position = State(initialValue: .region(region))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .topTrailing) {
+                Map(position: $position, interactionModes: .all) {
+                    Marker(title, coordinate: coordinate)
+                        .tint(.green)
+                }
+                .mapStyle(mapStyle.style)
+                .mapControls {
+                    MapCompass()
+                    MapPitchToggle()
+                    MapScaleView()
+                }
+
+                VStack(alignment: .trailing, spacing: 12) {
+                    Picker("Style", selection: $mapStyle) {
+                        ForEach(DriveMapView.MapStyleChoice.allCases) { choice in
+                            Text(choice.rawValue).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+
+                    Button {
+                        withAnimation {
+                            let region = MKCoordinateRegion(
+                                center: coordinate,
+                                latitudinalMeters: 3500,
+                                longitudinalMeters: 3500
+                            )
+                            position = .region(region)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "location.viewfinder")
+                            Text("Recenter")
+                        }
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.thinMaterial, in: Capsule())
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Charging Location")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
     }
 }
 
@@ -1072,27 +1476,64 @@ private struct ChargeTelemetryChartSection: View {
 
 private struct ChargePowerChartView: View {
     let points: [ChargePoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: ChargePoint? {
+        guard let date = selectedDate else { return nil }
+        return points.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let maxP = points.compactMap(\.chargerPowerKW).max() {
-                Text("Peak Rate: \(maxP.formatted(.number.precision(.fractionLength(1)))) kW")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let selected = selectedPoint, let p = selected.chargerPowerKW {
+                    Text("\(p.formatted(.number.precision(.fractionLength(1)))) kW")
+                        .font(.headline)
+                        .foregroundStyle(.green)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let maxP = points.compactMap(\.chargerPowerKW).max() {
+                    Text("Peak Rate: \(maxP.formatted(.number.precision(.fractionLength(1)))) kW")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Press & hold to scrub")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Chart(points) { point in
-                AreaMark(
-                    x: .value("Time", point.date),
-                    y: .value("Power (kW)", point.chargerPowerKW ?? 0)
-                )
-                .foregroundStyle(LinearGradient(colors: [.green.opacity(0.35), .green.opacity(0.05)], startPoint: .top, endPoint: .bottom))
 
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Power (kW)", point.chargerPowerKW ?? 0)
-                )
-                .foregroundStyle(.green)
+            Chart {
+                ForEach(points) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        y: .value("Power (kW)", point.chargerPowerKW ?? 0)
+                    )
+                    .foregroundStyle(LinearGradient(colors: [.green.opacity(0.35), .green.opacity(0.05)], startPoint: .top, endPoint: .bottom))
+
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Power (kW)", point.chargerPowerKW ?? 0)
+                    )
+                    .foregroundStyle(.green)
+                }
+
+                if let selected = selectedPoint, let p = selected.chargerPowerKW {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Power (kW)", p)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(.green)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -1100,22 +1541,62 @@ private struct ChargePowerChartView: View {
 
 private struct ChargeBatteryChartView: View {
     let points: [ChargePoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: ChargePoint? {
+        guard let date = selectedDate else { return nil }
+        return points.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            let bats = points.compactMap(\.batteryLevel)
-            if let start = bats.first, let end = bats.last {
-                Text("State of Charge: \(Int(start))% → \(Int(end))%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let selected = selectedPoint, let bat = selected.batteryLevel {
+                    let rangeStr = selected.idealRangeMiles.map { " (\($0.formatted(.number.precision(.fractionLength(0)))) mi)" } ?? ""
+                    Text("\(Int(bat))%\(rangeStr)")
+                        .font(.headline)
+                        .foregroundStyle(.green)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    let bats = points.compactMap(\.batteryLevel)
+                    if let start = bats.first, let end = bats.last {
+                        Text("State of Charge: \(Int(start))% → \(Int(end))%")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("Press & hold to scrub")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Chart(points) { point in
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Battery %", point.batteryLevel ?? 0)
-                )
-                .foregroundStyle(.green)
+
+            Chart {
+                ForEach(points) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Battery %", point.batteryLevel ?? 0)
+                    )
+                    .foregroundStyle(.green)
+                }
+
+                if let selected = selectedPoint, let bat = selected.batteryLevel {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Battery %", bat)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(.green)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -1123,27 +1604,64 @@ private struct ChargeBatteryChartView: View {
 
 private struct ChargeEnergyChartView: View {
     let points: [ChargePoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: ChargePoint? {
+        guard let date = selectedDate else { return nil }
+        return points.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let maxEnergy = points.compactMap(\.chargeEnergyAdded).max() {
-                Text("Total Added: \(maxEnergy.formatted(.number.precision(.fractionLength(1)))) kWh")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack {
+                if let selected = selectedPoint, let e = selected.chargeEnergyAdded {
+                    Text("\(e.formatted(.number.precision(.fractionLength(2)))) kWh")
+                        .font(.headline)
+                        .foregroundStyle(.blue)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if let maxEnergy = points.compactMap(\.chargeEnergyAdded).max() {
+                    Text("Total Added: \(maxEnergy.formatted(.number.precision(.fractionLength(1)))) kWh")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Press & hold to scrub")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
-            Chart(points) { point in
-                AreaMark(
-                    x: .value("Time", point.date),
-                    y: .value("Energy (kWh)", point.chargeEnergyAdded ?? 0)
-                )
-                .foregroundStyle(LinearGradient(colors: [.blue.opacity(0.35), .blue.opacity(0.05)], startPoint: .top, endPoint: .bottom))
 
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Energy (kWh)", point.chargeEnergyAdded ?? 0)
-                )
-                .foregroundStyle(.blue)
+            Chart {
+                ForEach(points) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        y: .value("Energy (kWh)", point.chargeEnergyAdded ?? 0)
+                    )
+                    .foregroundStyle(LinearGradient(colors: [.blue.opacity(0.35), .blue.opacity(0.05)], startPoint: .top, endPoint: .bottom))
+
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Energy (kWh)", point.chargeEnergyAdded ?? 0)
+                    )
+                    .foregroundStyle(.blue)
+                }
+
+                if let selected = selectedPoint, let e = selected.chargeEnergyAdded {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    PointMark(
+                        x: .value("Time", selected.date),
+                        y: .value("Energy (kWh)", e)
+                    )
+                    .symbol(.circle)
+                    .symbolSize(70)
+                    .foregroundStyle(.blue)
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -1151,35 +1669,82 @@ private struct ChargeEnergyChartView: View {
 
 private struct ChargeVoltageCurrentChartView: View {
     let points: [ChargePoint]
+    @State private var selectedDate: Date?
+
+    private var selectedPoint: ChargePoint? {
+        guard let date = selectedDate else { return nil }
+        return points.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                if let maxV = points.compactMap(\.chargerVoltage).max() {
-                    Text("Voltage: \(Int(maxV)) V")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                }
-                Spacer()
-                if let maxA = points.compactMap(\.chargerActualCurrent).max() {
-                    Text("Current: \(Int(maxA)) A")
-                        .font(.caption)
+                if let selected = selectedPoint {
+                    let vStr = selected.chargerVoltage.map { "\(Int($0)) V" } ?? "-- V"
+                    let aStr = selected.chargerActualCurrent.map { "\(Int($0)) A" } ?? "-- A"
+                    Text("\(vStr) / \(aStr)")
+                        .font(.headline)
                         .foregroundStyle(.orange)
+                    Text("at \(selected.date.formatted(date: .omitted, time: .standard))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    if let maxV = points.compactMap(\.chargerVoltage).max() {
+                        Text("Voltage: \(Int(maxV)) V")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    if let maxA = points.compactMap(\.chargerActualCurrent).max() {
+                        Text("Current: \(Int(maxA)) A")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
-            Chart(points) { point in
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Current (A)", point.chargerActualCurrent ?? 0)
-                )
-                .foregroundStyle(.orange)
 
-                LineMark(
-                    x: .value("Time", point.date),
-                    y: .value("Voltage (V)", (point.chargerVoltage ?? 0) / 10.0)
-                )
-                .foregroundStyle(.blue)
+            Chart {
+                ForEach(points) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Current (A)", point.chargerActualCurrent ?? 0)
+                    )
+                    .foregroundStyle(.orange)
+
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value("Voltage (V)", (point.chargerVoltage ?? 0) / 10.0)
+                    )
+                    .foregroundStyle(.blue)
+                }
+
+                if let selected = selectedPoint {
+                    RuleMark(x: .value("Time", selected.date))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
+
+                    if let a = selected.chargerActualCurrent {
+                        PointMark(
+                            x: .value("Time", selected.date),
+                            y: .value("Current (A)", a)
+                        )
+                        .symbol(.circle)
+                        .symbolSize(60)
+                        .foregroundStyle(.orange)
+                    }
+
+                    if let v = selected.chargerVoltage {
+                        PointMark(
+                            x: .value("Time", selected.date),
+                            y: .value("Voltage (V)", v / 10.0)
+                        )
+                        .symbol(.circle)
+                        .symbolSize(60)
+                        .foregroundStyle(.blue)
+                    }
+                }
             }
+            .chartXSelection(value: $selectedDate)
             .frame(height: 180)
         }
     }
@@ -1396,18 +1961,20 @@ final class DashboardViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
+        let client: GrafanaClient
         do {
-            let client = try makeClient()
-            async let summaryTask: () = loadSummary(client: client)
-            async let distanceTask: () = loadDistance(client: client)
-            async let chargingTask: () = loadCharging(client: client)
-            async let drivesTask: () = loadDrives(client: client, reset: true)
-            async let chargesTask: () = loadRecentCharges(client: client, reset: true)
-
-            _ = try await (summaryTask, distanceTask, chargingTask, drivesTask, chargesTask)
+            client = try makeClient()
         } catch {
-            errorMessage = error.localizedDescription
+            handleTaskError(error)
+            isLoading = false
+            return
         }
+
+        do { try await loadSummary(client: client) } catch { handleTaskError(error) }
+        do { try await loadDistance(client: client) } catch { handleTaskError(error) }
+        do { try await loadCharging(client: client) } catch { handleTaskError(error) }
+        do { try await loadDrives(client: client, reset: true) } catch { handleTaskError(error) }
+        do { try await loadRecentCharges(client: client, reset: true) } catch { handleTaskError(error) }
 
         isLoading = false
     }
@@ -1418,7 +1985,7 @@ final class DashboardViewModel: ObservableObject {
             let client = try makeClient()
             try await loadDrives(client: client, reset: true)
         } catch {
-            errorMessage = error.localizedDescription
+            handleTaskError(error)
         }
     }
 
@@ -1428,7 +1995,7 @@ final class DashboardViewModel: ObservableObject {
             let client = try makeClient()
             try await loadRecentCharges(client: client, reset: true)
         } catch {
-            errorMessage = error.localizedDescription
+            handleTaskError(error)
         }
     }
 
@@ -1442,7 +2009,7 @@ final class DashboardViewModel: ObservableObject {
             let client = try makeClient()
             try await loadDrives(client: client, reset: false)
         } catch {
-            errorMessage = error.localizedDescription
+            handleTaskError(error)
         }
     }
 
@@ -1456,8 +2023,16 @@ final class DashboardViewModel: ObservableObject {
             let client = try makeClient()
             try await loadRecentCharges(client: client, reset: false)
         } catch {
-            errorMessage = error.localizedDescription
+            handleTaskError(error)
         }
+    }
+
+    private func handleTaskError(_ error: Error) {
+        if error is CancellationError { return }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return }
+        let msg = error.localizedDescription
+        if msg.lowercased().contains("cancelled") || msg.lowercased().contains("canceled") { return }
+        self.errorMessage = msg
     }
 
     func loadDrivePositions(driveID: Int) async throws -> [DrivePositionPoint] {
