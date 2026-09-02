@@ -1303,8 +1303,16 @@ private struct DailyChargingChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Charging (14 days)")
-                .font(.headline)
+            HStack {
+                Text("Charging (14 days)")
+                    .font(.headline)
+                Spacer()
+                let totalKWh = points.map(\.value).reduce(0, +)
+                Text("Total: \(totalKWh.formatted(.number.precision(.fractionLength(1)))) kWh")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
             Chart(points) { point in
                 AreaMark(
                     x: .value("Day", point.day, unit: .day),
@@ -1317,6 +1325,19 @@ private struct DailyChargingChart: View {
                     y: .value("Energy (kWh)", point.value)
                 )
                 .foregroundStyle(.green)
+
+                PointMark(
+                    x: .value("Day", point.day, unit: .day),
+                    y: .value("Energy (kWh)", point.value)
+                )
+                .foregroundStyle(.green)
+                .annotation(position: .top, alignment: .center) {
+                    if point.value > 0.1 {
+                        Text(point.value >= 10 ? "\(point.value.formatted(.number.precision(.fractionLength(0))))" : "\(point.value.formatted(.number.precision(.fractionLength(1))))")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .frame(height: 220)
         }
