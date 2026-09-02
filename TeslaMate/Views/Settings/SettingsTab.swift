@@ -105,6 +105,13 @@ struct SettingsTab: View {
                 }
 
                 Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text(appVersionString)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Text("TeslaMate iOS queries your PostgreSQL telemetry database through Grafana's API. No WebView or third-party cloud is used.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -119,5 +126,11 @@ struct SettingsTab: View {
                 )
             }
         }
+    }
+
+    private var appVersionString: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        return "\(version) (\(build))"
     }
 }
