@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/Swift-6.0-orange?style=flat-square&logo=swift" alt="Swift" />
   <img src="https://img.shields.io/badge/UI-SwiftUI%20%26%20Swift%20Charts-purple?style=flat-square" alt="SwiftUI" />
   <img src="https://img.shields.io/badge/Maps-MapKit-green?style=flat-square" alt="MapKit" />
+  <img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="License" />
 </p>
 
 ---
@@ -135,3 +136,10 @@ xcodebuild -scheme TeslaMate -destination 'platform=iOS Simulator,name=iPhone 17
 - **Direct Communication**: Telemetry is fetched directly between your device and your Grafana instance.
 - **No Third-Party Servers**: No external tracking, telemetry analytics, or intermediate cloud servers are used.
 - **Read-Only Access**: Uses a Grafana *Viewer* service account token to strictly query historical tables without write permissions.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+

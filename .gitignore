@@ -1,0 +1,23 @@
+# Xcode
+## User settings
+xcuserdata/
+*.xcuserdatad
+
+## Build generated
+build/
+DerivedData/
+*.moved-aside
+*.xcuserstate
+
+## macOS
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+## Swift Package Manager
+.build/
+.swiftpm/
+
+## Backups & Logs
+*.log
+*.tmp
